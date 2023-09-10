@@ -383,6 +383,52 @@ export class Store<T, I extends indexKey<T>> {
       logger().debug(["deleted", ...entry.key].join(" "));
     }
   }
+
+  /**
+   * Deletes all items from all of the indices except the main by-id index, then recreates them.
+   * Useful when you changed the index definition and want to rebuild it.
+   *
+   * Warning: This is not an atomic operation. You should turn off your main application while doing this.
+   *
+   * You can set up a logger to see what's happening:
+   *
+   * ```js
+   * import { handlers, setup } from "https://deno.land/std/log/mod.ts";
+   *
+   * setup({
+   *   handlers: {
+   *     console: new handlers.ConsoleHandler("DEBUG"),
+   *   },
+   *   loggers: {
+   *     indexed_kv: { level: "DEBUG", handlers: ["console"] },
+   *   },
+   * });
+   * ```
+   */
+  async rebuildIndices() {
+    // remove everything except the main index
+    for await (const entry of this.db.list({ prefix: [this.key] })) {
+      const [_storeKey, index] = entry.key;
+      if (index === "id") continue;
+      await this.db.delete(entry.key);
+      logger().debug(["deleted", ...entry.key].join(" "));
+    }
+    // iterate over the new defined indices
+    for (const index of this.indices) {
+      // iterate over all items in the store
+      for await (const entry of this.db.list({ prefix: [this.key, "id"] })) {
+        const [_storeKey, _index, id] = entry.key;
+        if (typeof id !== "string") continue;
+        // get the index value
+        const indexValue: Deno.KvKeyPart = index
+          .split(".")
+          .reduce((value, key) => value[key], entry.value as any);
+        // add the item to the index
+        await this.db.set([this.key, index, indexValue, id], entry.value);
+        logger().debug(["created", this.key, index, indexValue, id].join(" "));
+      }
+    }
+  }
 }
 
 /**

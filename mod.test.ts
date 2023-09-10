@@ -1,5 +1,15 @@
 import { assert } from "https://deno.land/std@0.198.0/assert/assert.ts";
 import { Schema, Store } from "./mod.ts";
+import { handlers, setup } from "https://deno.land/std@0.201.0/log/mod.ts";
+
+setup({
+  handlers: {
+    console: new handlers.ConsoleHandler("DEBUG"),
+  },
+  loggers: {
+    indexed_kv: { level: "DEBUG", handlers: ["console"] },
+  },
+});
 
 const db = await Deno.openKv();
 
@@ -89,4 +99,39 @@ Deno.test("fail on concurrent update", async () => {
   assert(result === true);
 
   await job.delete();
+});
+
+Deno.test("rebuilds indices", async () => {
+  type OldJobSchema = {
+    requestedBy: string;
+    params: {
+      a: number;
+    };
+  };
+
+  const oldJobStore = new Store(db, "jobs", {
+    schema: new Schema<OldJobSchema>(),
+    indices: ["params.a"],
+  });
+
+  await oldJobStore.deleteAll();
+  await oldJobStore.create({ requestedBy: "a", params: { a: 1 } });
+  await oldJobStore.create({ requestedBy: "a", params: { a: 2 } });
+  await oldJobStore.create({ requestedBy: "b", params: { a: 3 } });
+  assert((await oldJobStore.getBy("params.a", 1))[0].value.requestedBy === "a");
+  assert((await oldJobStore.getBy("params.a", 3))[0].value.requestedBy === "b");
+
+  const newJobStore = new Store(db, "jobs", {
+    schema: new Schema<OldJobSchema>(),
+    indices: ["requestedBy"],
+  });
+
+  assert((await newJobStore.getBy("requestedBy", "a")).length === 0);
+
+  await newJobStore.rebuildIndices();
+
+  assert((await newJobStore.getBy("requestedBy", "a")).length === 2);
+  assert((await oldJobStore.getBy("params.a", 1)).length === 0);
+
+  await newJobStore.deleteAll();
 });
