@@ -67,13 +67,15 @@ export type indexValue<T, I extends indexKey<T>> =
 /**
  * Only used to pass the type parameter to {@link Store} constructor without specifying all of them explicitly.
  * It's just an empty class and does nothing. See https://github.com/microsoft/TypeScript/issues/26242
+ *
+ * @template T Type of items stored in the store.
  */
 export class Schema<T> {}
 
 /**
  * Options for initializing a {@link Store}.
  */
-interface StoreOptions<T, I> {
+export interface StoreOptions<T, I> {
   /**
    * Defines the type T of values that will be stored in this store.
    * Doesn't actually do anything, just used to pass the type parameter.
@@ -87,9 +89,9 @@ interface StoreOptions<T, I> {
 
 /**
  * Options for querying by index.
- * Passing a value directly is shortcut for `{ value: value }`.
+ * Passing a value directly is the same as passing {@link IndexListValueSelector.value}.
  */
-type IndexListSelector<T, I extends indexKey<T>> =
+export type IndexListSelector<T, I extends indexKey<T>> =
   | indexValue<T, I>
   | IndexListValueSelector<T, I>
   | IndexListRangeSelector<T, I>;
@@ -98,7 +100,7 @@ type IndexListSelector<T, I extends indexKey<T>> =
  * Options for querying items indexed under a single value.
  * When used, the results will be sorted by id (creation date).
  */
-interface IndexListValueSelector<T, I extends indexKey<T>> {
+export interface IndexListValueSelector<T, I extends indexKey<T>> {
   start?: undefined;
   end?: undefined;
   /**
@@ -109,13 +111,11 @@ interface IndexListValueSelector<T, I extends indexKey<T>> {
   /**
    * Starting id or date.
    * Limits the results to items created after this date.
-   * See {@link Deno.KvListSelector}.
    */
   after?: Date | string;
   /**
    * Ending id or date.
    * Limits the results to items created before this date.
-   * See {@link Deno.KvListSelector}.
    */
   before?: Date | string;
 }
@@ -156,6 +156,9 @@ type ListSelector = {
 
 /**
  * Store of values of type T.
+ *
+ * @template T Type of items stored in the store.
+ * @template I Union of index paths. Should be inferred automatically.
  */
 export class Store<T, I extends indexKey<T>> {
   readonly db: Deno.Kv;
@@ -397,9 +400,9 @@ export class Model<T> {
   value: T;
 
   /**
-   * @internal
    * Creates a new model instance.
    * You shouldn't need to call this directly.
+   * @internal
    */
   constructor(
     store: Store<T, indexKey<T>>,

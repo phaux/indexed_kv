@@ -1,8 +1,10 @@
 # Indexed KV
 
+[![deno doc](https://doc.deno.land/badge.svg)](https://deno.land/x/indexed_kv/mod.ts)
+
 Small wrapper for Deno KV.
 
-Example:
+## Example
 
 ```ts
 import { Schema, Store } from "https://deno.land/x/indexed_kv/mod.ts";
@@ -42,5 +44,3 @@ const jobsByStatus = await jobStore.getBy("status.type", "processing");
 
 await jobsByStatus[0].delete();
 ```
-
-See [docs](https://deno.land/x/indexed_kv).
