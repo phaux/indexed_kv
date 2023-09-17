@@ -1,7 +1,6 @@
-import { Schema, Store } from "./mod.ts";
+import { Store } from "./mod.ts";
 import { handlers, setup } from "https://deno.land/std@0.201.0/log/mod.ts";
 import {
-  assert,
   assertEquals,
   assertRejects,
 } from "https://deno.land/std@0.135.0/testing/asserts.ts";
@@ -23,10 +22,7 @@ Deno.test("create and delete", async () => {
     y: number;
   }
 
-  const pointStore = new Store(db, "points", {
-    schema: new Schema<PointSchema>(),
-    indices: ["x", "y"],
-  });
+  const pointStore = new Store<PointSchema>(db, "points");
 
   await pointStore.deleteAll();
   const point1 = await pointStore.create({ x: 1, y: 2 });
@@ -56,9 +52,16 @@ Deno.test("list by index", async () => {
     lastUpdateDate: Date;
   }
 
-  const taskStore = new Store(db, "tasks", {
-    schema: new Schema<TaskSchema>(),
-    indices: ["requestedBy", "status.type"],
+  type TaskIndices = {
+    "requestedBy": string;
+    "status.type": "idle" | "processing" | "done";
+  };
+
+  const taskStore = new Store<TaskSchema, TaskIndices>(db, "tasks", {
+    indices: {
+      "requestedBy": { getValue: (item) => item.requestedBy },
+      "status.type": { getValue: (item) => item.status.type },
+    },
   });
 
   await taskStore.deleteAll();
@@ -70,24 +73,28 @@ Deno.test("list by index", async () => {
     lastUpdateDate: new Date(),
   });
   assertEquals(
-    (await taskStore.getBy("requestedBy", { value: "test" }))[0].value.params,
+    (await taskStore.getBy("requestedBy", { value: "test" }))[0].value
+      .params,
     { a: 1, b: null },
   );
   assertEquals(
-    (await taskStore.getBy("status.type", { value: "idle" }))[0].value.params,
+    (await taskStore.getBy("status.type", { value: "idle" }))[0].value
+      .params,
     { a: 1, b: null },
   );
 
   await task.update({ status: { type: "processing", progress: 33 } });
   assertEquals(
-    (await taskStore.getBy("status.type", { value: "processing" }))[0].value
+    (await taskStore.getBy("status.type", { value: "processing" }))[0]
+      .value
       .params,
     { a: 1, b: null },
   );
 
   await task.update({ status: { type: "done" } });
   assertEquals(
-    (await taskStore.getBy("status.type", { value: "done" }))[0].value.params,
+    (await taskStore.getBy("status.type", { value: "done" }))[0].value
+      .params,
     { a: 1, b: null },
   );
   assertEquals(
@@ -141,9 +148,15 @@ Deno.test("list by index", async () => {
 });
 
 Deno.test("fail on concurrent update", async () => {
-  const fooStore = new Store(db, "foos", {
-    schema: new Schema<{ a: string; b: string; c: string }>(),
-    indices: ["a", "b", "c"],
+  const fooStore = new Store<
+    { a: string; b: string; c: string },
+    { "a": string; "b": string; "c": string }
+  >(db, "foos", {
+    indices: {
+      "a": { getValue: (item) => item.a },
+      "b": { getValue: (item) => item.b },
+      "c": { getValue: (item) => item.c },
+    },
   });
 
   await fooStore.deleteAll();
@@ -172,41 +185,47 @@ Deno.test("rebuilds indices", async () => {
     };
   };
 
-  const oldTaskStore = new Store(db, "tasks", {
-    schema: new Schema<OldTaskSchema>(),
-    indices: ["params.a"],
+  const oldTaskStore = new Store<OldTaskSchema, { a: number }>(db, "tasks", {
+    indices: {
+      "a": { getValue: (task) => task.params.a },
+    },
   });
 
   await oldTaskStore.deleteAll();
-  await oldTaskStore.create({ requestedBy: "a", params: { a: 1 } });
-  await oldTaskStore.create({ requestedBy: "a", params: { a: 2 } });
-  await oldTaskStore.create({ requestedBy: "b", params: { a: 3 } });
+  await oldTaskStore.create({ requestedBy: "user_a", params: { a: 1 } });
+  await oldTaskStore.create({ requestedBy: "user_a", params: { a: 2 } });
+  await oldTaskStore.create({ requestedBy: "user_b", params: { a: 3 } });
   assertEquals(
-    (await oldTaskStore.getBy("params.a", { value: 1 }))[0].value,
-    { requestedBy: "a", params: { a: 1 } },
+    (await oldTaskStore.getBy("a", { value: 1 }))[0].value,
+    { requestedBy: "user_a", params: { a: 1 } },
   );
   assertEquals(
-    (await oldTaskStore.getBy("params.a", { value: 3 }))[0].value,
-    { requestedBy: "b", params: { a: 3 } },
+    (await oldTaskStore.getBy("a", { value: 3 }))[0].value,
+    { requestedBy: "user_b", params: { a: 3 } },
   );
 
-  const newTaskStore = new Store(db, "tasks", {
-    schema: new Schema<OldTaskSchema>(),
-    indices: ["requestedBy"],
-  });
+  const newTaskStore = new Store<OldTaskSchema, { requestedBy: string }>(
+    db,
+    "tasks",
+    {
+      indices: {
+        "requestedBy": { getValue: (task) => task.requestedBy },
+      },
+    },
+  );
 
   assertEquals(
-    (await newTaskStore.getBy("requestedBy", { value: "a" })).length,
+    (await newTaskStore.getBy("requestedBy", { value: "user_a" })).length,
     0,
   );
 
   await newTaskStore.rebuildIndices();
 
   assertEquals(
-    (await newTaskStore.getBy("requestedBy", { value: "a" })).length,
+    (await newTaskStore.getBy("requestedBy", { value: "user_a" })).length,
     2,
   );
-  assertEquals((await oldTaskStore.getBy("params.a", { value: 1 })).length, 0);
+  assertEquals((await oldTaskStore.getBy("a", { value: 1 })).length, 0);
 
   await newTaskStore.deleteAll();
 });
@@ -242,14 +261,26 @@ Deno.test("migrate", async () => {
       | { type: "done" };
   }
 
-  const jobStoreV1 = new Store(db, "job", {
-    schema: new Schema<JobSchemaV1>(),
-    indices: ["status.type"],
+  type JobIndicesV1 = {
+    "status.type": JobSchemaV1["status"]["type"];
+  };
+
+  const jobStoreV1 = new Store<JobSchemaV1, JobIndicesV1>(db, "job", {
+    indices: {
+      "status.type": { getValue: (job) => job.status.type },
+    },
   });
 
-  const jobStore = new Store(db, "job", {
-    schema: new Schema<JobSchema>(),
-    indices: ["status.type", "user.id"],
+  type JobIndices = {
+    "status.type": JobSchema["status"]["type"];
+    "user.id": User["id"];
+  };
+
+  const jobStore = new Store<JobSchema, JobIndices>(db, "job", {
+    indices: {
+      "status.type": { getValue: (job) => job.status.type },
+      "user.id": { getValue: (job) => job.user.id },
+    },
   });
 
   await jobStoreV1.deleteAll();
