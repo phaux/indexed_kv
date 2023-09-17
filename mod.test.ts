@@ -1,6 +1,7 @@
 import { Schema, Store } from "./mod.ts";
 import { handlers, setup } from "https://deno.land/std@0.201.0/log/mod.ts";
 import {
+  assert,
   assertEquals,
   assertRejects,
 } from "https://deno.land/std@0.135.0/testing/asserts.ts";
@@ -103,6 +104,40 @@ Deno.test("list by index", async () => {
     (await taskStore.getBy("requestedBy", { value: "test" })).length,
     0,
   );
+
+  await taskStore.create({
+    requestedBy: "test1",
+    params: { a: 1, b: null },
+    status: { type: "idle" },
+    lastUpdateDate: new Date(),
+  });
+  await taskStore.create({
+    requestedBy: "test2",
+    params: { a: 1, b: null },
+    status: { type: "idle" },
+    lastUpdateDate: new Date(),
+  });
+  await taskStore.create({
+    requestedBy: "test3",
+    params: { a: 1, b: null },
+    status: { type: "idle" },
+    lastUpdateDate: new Date(),
+  });
+
+  assertEquals(
+    (await taskStore.getBy("requestedBy", {})).length,
+    3,
+  );
+  assertEquals(
+    (await taskStore.getBy("requestedBy", { start: "test2" })).length,
+    2,
+  );
+  assertEquals(
+    (await taskStore.getBy("requestedBy", { end: "test3" })).length,
+    2,
+  );
+
+  await taskStore.deleteAll();
 });
 
 Deno.test("fail on concurrent update", async () => {

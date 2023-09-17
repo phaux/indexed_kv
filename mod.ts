@@ -94,64 +94,57 @@ export interface StoreOptions<T, I> {
 }
 
 /**
- * Options for querying items indexed under a single value.
- *
- * When used, the results will be sorted by ID (creation date).
+ * Options for querying store items by an index.
  */
-export interface IndexListValueSelector<T, I extends indexKey<T>> {
-  start?: undefined;
-  end?: undefined;
+export interface IndexListSelector<T, I extends indexKey<T>> {
   /**
-   * Value to be queried.
-   *
-   * Limits the results to items indexed under this value.
+   * Starting index value. Inclusive.
    */
-  value: indexValue<T, I>;
+  start?: indexValue<T, I>;
+
   /**
-   * Starting ID or date.
+   * Ending index value. Exclusive.
+   */
+  end?: indexValue<T, I>;
+
+  /**
+   * Single index value to be queried.
+   */
+  value?: indexValue<T, I>;
+
+  /**
+   * Starting ID or date. Inclusive.
    *
-   * Limits the results to items created after this date.
+   * Limits the results to items created after and including this date.
+   *
+   * Only works as expected when {@link IndexListSelector.value} is also passed.
+   * Ignored otherwise.
    */
   after?: Date | string;
+
   /**
-   * Ending ID or date.
+   * Ending ID or date. Exclusive.
    *
    * Limits the results to items created before this date.
+   *
+   * Only works as expected when {@link IndexListSelector.value} is also passed.
+   * Ignored otherwise.
    */
   before?: Date | string;
 }
 
 /**
- * Options for querying items indexed under a range of values.
- *
- * When used, the results will be sorted by the index value, then their ID (creation date).
- */
-export interface IndexListRangeSelector<T, I extends indexKey<T>> {
-  /**
-   * Starting index value.
-   */
-  start: indexValue<T, I>;
-  /**
-   * Ending index value.
-   */
-  end: indexValue<T, I>;
-  value?: undefined;
-  after?: undefined;
-  before?: undefined;
-}
-
-/**
- * Options for querying all items in a collection.
+ * Options for querying all items in the store.
  */
 export interface ListSelector {
   /**
-   * Starting ID or date.
+   * Starting ID or date. Inclusive.
    *
    * Limits the results to items created after this date.
    */
   after?: Date | string;
   /**
-   * Ending ID or date.
+   * Ending ID or date. Exclusive.
    *
    * Limits the results to items created before this date.
    */
@@ -234,7 +227,7 @@ export class Store<T, I extends indexKey<T>> {
    */
   async *listBy<J extends I>(
     index: J,
-    selector: IndexListValueSelector<T, J> | IndexListRangeSelector<T, J>,
+    selector: IndexListSelector<T, J>,
     options?: Deno.KvListOptions,
   ): AsyncIterableIterator<Model<T>> {
     let kvSelector: Deno.KvListSelector;
@@ -242,6 +235,7 @@ export class Store<T, I extends indexKey<T>> {
     // if single index value was passed
     if (selector.value != null) {
       // request items under index value limited by date
+
       let start: Deno.KvKey | undefined;
       if (selector.after != null) {
         const after = selector.after instanceof Date
@@ -259,24 +253,33 @@ export class Store<T, I extends indexKey<T>> {
       }
 
       // if both bounds were passed, request specific range
-      if (start && end) kvSelector = { start, end };
-      // if only one bound was passed, include prefix for whole index
-      else {kvSelector = {
+      if (start && end) {
+        kvSelector = { start, end };
+      } //
+      // if only one bound was passed, include prefix for whole index value
+      else {
+        kvSelector = {
           prefix: [this.key, index, selector.value],
           start,
           end,
-        };}
+        };
+      }
     } //
     // if index value range was passed
-    else if (selector.start != null && selector.end != null) {
-      // request items under a range of index values
-      kvSelector = {
-        start: [this.key, index, selector.start],
-        end: [this.key, index, selector.end],
-      };
-    } // invalid selector
     else {
-      throw new TypeError("Invalid selector");
+      // request items limited by index value
+
+      const start = selector.start != null
+        ? [this.key, index, selector.start]
+        : undefined;
+      const end = selector.end != null
+        ? [this.key, index, selector.end]
+        : undefined;
+
+      // if both bounds were passed, request specific range
+      if (start && end) kvSelector = { start, end };
+      // if only one bound was passed, include prefix for whole index
+      else kvSelector = { prefix: [this.key, index], start, end };
     }
 
     for await (const entry of this.db.list<T>(kvSelector, options)) {
@@ -291,7 +294,7 @@ export class Store<T, I extends indexKey<T>> {
    */
   async getBy<J extends I>(
     index: J,
-    selector: IndexListValueSelector<T, J> | IndexListRangeSelector<T, J>,
+    selector: IndexListSelector<T, J>,
     options?: Deno.KvListOptions & { signal?: AbortSignal },
   ): Promise<Array<Model<T>>> {
     const items: Model<T>[] = [];
