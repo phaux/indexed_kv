@@ -4,6 +4,9 @@
 
 Small wrapper for Deno KV.
 
+- Adds strong typing.
+- Automatically maintains indices.
+
 ## Example
 
 ```ts
@@ -64,3 +67,9 @@ const jobsByStatus = await jobStore.getBy("statusType", {
 
 await jobsByStatus[0].delete();
 ```
+
+## TODO
+
+- [ ] Get/set as single atomic operation.
+- [ ] Allow indices of only references to main data.
+- [ ] Unique indices.

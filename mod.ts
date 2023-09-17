@@ -19,7 +19,7 @@ export interface StoreOptions<Item, IndexMap extends AnyIndexMap> {
   /**
    * Map of index options.
    */
-  readonly indices?: IndexOptionsMap<Item, IndexMap>;
+  readonly indices: IndexOptionsMap<Item, IndexMap>;
 }
 
 export type IndexOptionsMap<Item, IndexMap extends AnyIndexMap> = {
@@ -85,7 +85,7 @@ export interface ListSelector {
   /**
    * Starting ID or date. Inclusive.
    *
-   * Limits the results to items created after this date.
+   * Limits the results to items created after and including this date.
    */
   after?: Date | string;
   /**
@@ -136,7 +136,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
   constructor(
     db: Deno.Kv,
     key: Deno.KvKeyPart,
-    options: StoreOptions<Item, IndexMap> = {},
+    options: StoreOptions<Item, IndexMap>,
   ) {
     this.db = db;
     this.key = key;
@@ -156,7 +156,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
       `Creating ${id}: Created ${[this.key, MAIN_INDEX_KEY, id].join("/")}`,
     );
     for (
-      const [indexKey, index] of Object.entries(this.options.indices ?? {})
+      const [indexKey, index] of Object.entries(this.options.indices)
     ) {
       const indexValue = index.getValue(value);
       await this.db.set([this.key, indexKey, indexValue, id], value);
@@ -170,7 +170,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
   }
 
   /**
-   * Returns a single item from the store by it's ID.
+   * Returns a single item from the store by its ID.
    */
   async getById(id: string): Promise<Model<Item> | null> {
     const entry = await this.db.get<Item>([this.key, MAIN_INDEX_KEY, id]);
@@ -180,6 +180,8 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
 
   /**
    * Returns iterator over values based on an index.
+   *
+   * The items are sorted by index value, then by creation date.
    */
   async *listBy<IndexKey extends keyof IndexMap & string>(
     index: IndexKey,
@@ -239,7 +241,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
     }
 
     for await (const entry of this.db.list<Item>(kvSelector, options)) {
-      const [_storeKey, _index, _indexValue, id] = entry.key;
+      const [_storeKey, _indexKey, _indexValue, id] = entry.key;
       if (typeof id !== "string") continue;
       yield new Model(this, id, entry.value);
     }
@@ -247,6 +249,8 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
 
   /**
    * Returns array of values based on an index.
+   *
+   * The items are sorted by index value, then by creation date.
    */
   async getBy<IndexKey extends keyof IndexMap & string>(
     index: IndexKey,
@@ -273,7 +277,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
   /**
    * Returns iterator over the main by-ID index.
    *
-   * It is automatically sorted by creation date.
+   * The items are sorted by creation date.
    */
   async *listAll(
     selector?: ListSelector,
@@ -303,7 +307,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
     else kvSelector = { prefix: [this.key, MAIN_INDEX_KEY], start, end };
 
     for await (const entry of this.db.list<Item>(kvSelector, options)) {
-      const [_storeKey, _index, id] = entry.key;
+      const [_storeKey, _indexKey, id] = entry.key;
       if (typeof id !== "string") continue;
       yield new Model(this, id, entry.value);
     }
@@ -312,7 +316,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
   /**
    * Returns array of items from the main by-ID index.
    *
-   * It is automatically sorted by creation date.
+   * The items are sorted by creation date.
    */
   async getAll(
     selector?: ListSelector,
@@ -382,7 +386,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
 
     // iterate over the new defined indices
     for (
-      const [indexKey, index] of Object.entries(this.options.indices ?? {})
+      const [indexKey, index] of Object.entries(this.options.indices)
     ) {
       // iterate over the main index
       for await (
@@ -442,11 +446,10 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
    *   user: { name: string, lastName?: string };
    * }
    *
-   * const userStore = new Store(db, "users", { schema: new Schema<UserV2>(), indices: ["user.name"] });
+   * const userStore = new Store<UserV2>(db, "users");
    *
    * // Don't forget await or your app will be running during migrating (bad)!
    * await userStore.migrate((user: UserV1) => ({ user: { name: user.userName } });
-   * await userStore.rebuildIndices();
    *
    * await main();
    * ```
@@ -514,6 +517,8 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
 
 /**
  * Single item in a {@link Store}.
+ *
+ * @template Item Type of the item wrapped in the model.
  */
 export class Model<Item> {
   /**
@@ -581,7 +586,7 @@ export class Model<Item> {
     const oldIndexEntries: Record<string, Deno.KvEntryMaybe<Item>> = {};
     for (
       const [indexKey, index] of Object.entries(
-        this.store.options.indices ?? {},
+        this.store.options.indices,
       )
     ) {
       const indexValue = index.getValue(oldEntry.value);
@@ -616,7 +621,7 @@ export class Model<Item> {
     // update all index entries
     for (
       const [indexKey, index] of Object.entries(
-        this.store.options.indices ?? {},
+        this.store.options.indices,
       )
     ) {
       const oldIndexValue = index.getValue(oldEntry.value);
@@ -714,7 +719,7 @@ export class Model<Item> {
     // delete all index entries
     for (
       const [indexKey, index] of Object.entries(
-        this.store.options.indices ?? {},
+        this.store.options.indices,
       )
     ) {
       const indexValue = index.getValue(entry.value);

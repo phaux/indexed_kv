@@ -3,7 +3,7 @@ import { handlers, setup } from "https://deno.land/std@0.201.0/log/mod.ts";
 import {
   assertEquals,
   assertRejects,
-} from "https://deno.land/std@0.135.0/testing/asserts.ts";
+} from "https://deno.land/std@0.195.0/assert/mod.ts";
 
 setup({
   handlers: {
@@ -22,7 +22,7 @@ Deno.test("create and delete", async () => {
     y: number;
   }
 
-  const pointStore = new Store<PointSchema>(db, "points");
+  const pointStore = new Store<PointSchema>(db, "points", { indices: {} });
 
   await pointStore.deleteAll();
   const point1 = await pointStore.create({ x: 1, y: 2 });
