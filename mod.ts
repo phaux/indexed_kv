@@ -34,6 +34,17 @@ export interface IndexOptions<Item, IndexValue> {
    * Computes the index value for an item.
    */
   readonly getValue: (item: Item) => IndexValue;
+
+  /**
+   * Whether to save a copy of the item in the index.
+   *
+   * Saving a copy of the item makes retrieving the item faster but also increases the size of the database.
+   *
+   * Saving only a reference requires an additional request to the main index to retrieve the item when getting the item by the index.
+   *
+   * Defaults to false.
+   */
+  copy?: boolean;
 }
 
 export type AnyIndexMap = Record<string, Deno.KvKeyPart>;
@@ -107,7 +118,7 @@ export interface GetOptions extends Deno.KvListOptions {
 }
 
 /**
- * Store of values of type T.
+ * Store of values.
  *
  * @template Item Type of items stored in the store.
  * @template IndexMap Map of index names to their types.
@@ -156,10 +167,15 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
       `Creating ${id}: Created ${[this.key, MAIN_INDEX_KEY, id].join("/")}`,
     );
     for (
-      const [indexKey, index] of Object.entries(this.options.indices)
+      const [indexKey, index] of Object.entries<
+        IndexOptions<Item, Deno.KvKeyPart>
+      >(this.options.indices)
     ) {
       const indexValue = index.getValue(value);
-      await this.db.set([this.key, indexKey, indexValue, id], value);
+      await this.db.set(
+        [this.key, indexKey, indexValue, id],
+        index.copy ? value : null,
+      );
       logger().debug(
         `Creating ${id}: Created ${
           [this.key, indexKey, indexValue, id].join("/")
@@ -243,7 +259,9 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
     for await (const entry of this.db.list<Item>(kvSelector, options)) {
       const [_storeKey, _indexKey, _indexValue, id] = entry.key;
       if (typeof id !== "string") continue;
-      yield new Model(this, id, entry.value);
+      // if the index is not copy we must get the item from the main index
+      const value = entry.value ?? (await this.getById(id))!.value;
+      yield new Model(this, id, value);
     }
   }
 
@@ -386,7 +404,9 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
 
     // iterate over the new defined indices
     for (
-      const [indexKey, index] of Object.entries(this.options.indices)
+      const [indexKey, index] of Object.entries<
+        IndexOptions<Item, Deno.KvKeyPart>
+      >(this.options.indices)
     ) {
       // iterate over the main index
       for await (
@@ -399,7 +419,10 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
         // get the index value
         const indexValue = index.getValue(entry.value);
         // add the item to the index
-        await this.db.set([this.key, indexKey, indexValue, id], entry.value);
+        await this.db.set(
+          [this.key, indexKey, indexValue, id],
+          index.copy ? entry.value : null,
+        );
         logger().info(
           `Rebuiliding indices: Created ${
             [this.key, indexKey, indexValue, id].join("/")
@@ -585,7 +608,9 @@ export class Model<Item> {
     // get all current index entries
     const oldIndexEntries: Record<string, Deno.KvEntryMaybe<Item>> = {};
     for (
-      const [indexKey, index] of Object.entries(
+      const [indexKey, index] of Object.entries<
+        IndexOptions<Item, Deno.KvKeyPart>
+      >(
         this.store.options.indices,
       )
     ) {
@@ -620,7 +645,9 @@ export class Model<Item> {
 
     // update all index entries
     for (
-      const [indexKey, index] of Object.entries(
+      const [indexKey, index] of Object.entries<
+        IndexOptions<Item, Deno.KvKeyPart>
+      >(
         this.store.options.indices,
       )
     ) {
@@ -629,7 +656,10 @@ export class Model<Item> {
       if (newIndexValue === oldIndexValue) {
         transaction
           .check(oldIndexEntries[indexKey])
-          .set([this.store.key, indexKey, newIndexValue, this.id], this.value);
+          .set(
+            [this.store.key, indexKey, newIndexValue, this.id],
+            index.copy ? this.value : null,
+          );
         logger().debug(
           `Updating ${this.id}: Updating ${
             [this.store.key, indexKey, newIndexValue, this.id].join("/")
@@ -639,7 +669,10 @@ export class Model<Item> {
         transaction
           .check(oldIndexEntries[indexKey])
           .delete([this.store.key, indexKey, oldIndexValue, this.id])
-          .set([this.store.key, indexKey, newIndexValue, this.id], this.value);
+          .set(
+            [this.store.key, indexKey, newIndexValue, this.id],
+            index.copy ? this.value : null,
+          );
         logger().debug(
           `Updating ${this.id}: Deleting ${
             [this.store.key, indexKey, oldIndexValue, this.id].join("/")
@@ -718,7 +751,9 @@ export class Model<Item> {
 
     // delete all index entries
     for (
-      const [indexKey, index] of Object.entries(
+      const [indexKey, index] of Object.entries<
+        IndexOptions<Item, Deno.KvKeyPart>
+      >(
         this.store.options.indices,
       )
     ) {

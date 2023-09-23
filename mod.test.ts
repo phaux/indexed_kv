@@ -1,13 +1,13 @@
+import { ConsoleHandler } from "https://deno.land/std@0.201.0/log/handlers.ts";
 import { Store } from "./mod.ts";
-import { handlers, setup } from "https://deno.land/std@0.201.0/log/mod.ts";
-import {
-  assertEquals,
-  assertRejects,
-} from "https://deno.land/std@0.195.0/assert/mod.ts";
+import { setup } from "https://deno.land/std@0.201.0/log/mod.ts";
+import { assertEquals } from "https://deno.land/std@0.195.0/assert/assert_equals.ts";
+import { assertRejects } from "https://deno.land/std@0.195.0/assert/assert_rejects.ts";
+import { assert } from "https://deno.land/std@0.201.0/assert/assert.ts";
 
 setup({
   handlers: {
-    console: new handlers.ConsoleHandler("DEBUG"),
+    console: new ConsoleHandler("DEBUG"),
   },
   loggers: {
     indexed_kv: { level: "DEBUG", handlers: ["console"] },
@@ -356,4 +356,78 @@ Deno.test("migrate", async () => {
   });
 
   await jobStore.deleteAll();
+});
+
+Deno.test("index copy vs reference", async () => {
+  const fooStore = new Store<{ x: number }, { x: number }>(db, "foos", {
+    indices: {
+      "x": { copy: true, getValue: (item) => item.x },
+    },
+  });
+  await fooStore.deleteAll();
+
+  const foo = await fooStore.create({ x: 123 });
+
+  {
+    const entry = await db.get(["foos", "id", foo.id]);
+    assertEquals(entry.value, { x: 123 });
+  }
+  {
+    const entry = await db.get(["foos", "x", 123, foo.id]);
+    assertEquals(entry.value, { x: 123 });
+  }
+
+  await foo.update({ x: 456 });
+
+  {
+    const entry = await db.get(["foos", "id", foo.id]);
+    assertEquals(entry.value, { x: 456 });
+  }
+  {
+    const entry = await db.get(["foos", "x", 123, foo.id]);
+    assert(entry.versionstamp == null);
+  }
+  {
+    const entry = await db.get(["foos", "x", 456, foo.id]);
+    assertEquals(entry.value, { x: 456 });
+  }
+
+  await fooStore.deleteAll();
+
+  const barStore = new Store<{ x: number }, { x: number }>(db, "bars", {
+    indices: {
+      "x": { copy: false, getValue: (item) => item.x },
+    },
+  });
+  await barStore.deleteAll();
+
+  const bar = await barStore.create({ x: 123 });
+
+  {
+    const entry = await db.get(["bars", "id", bar.id]);
+    assertEquals(entry.value, { x: 123 });
+  }
+  {
+    const entry = await db.get(["bars", "x", 123, bar.id]);
+    assert(entry.versionstamp != null);
+    assertEquals(entry.value, null);
+  }
+
+  await bar.update({ x: 456 });
+
+  {
+    const entry = await db.get(["bars", "id", bar.id]);
+    assertEquals(entry.value, { x: 456 });
+  }
+  {
+    const entry = await db.get(["bars", "x", 123, bar.id]);
+    assert(entry.versionstamp == null);
+  }
+  {
+    const entry = await db.get(["bars", "x", 456, bar.id]);
+    assert(entry.versionstamp != null);
+    assertEquals(entry.value, null);
+  }
+
+  await barStore.deleteAll();
 });

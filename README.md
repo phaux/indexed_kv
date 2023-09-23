@@ -71,5 +71,5 @@ await jobsByStatus[0].delete();
 ## TODO
 
 - [ ] Get/set as single atomic operation.
-- [ ] Allow indices of only references to main data.
+- [x] Allow indices of only references to main data.
 - [ ] Unique indices.
