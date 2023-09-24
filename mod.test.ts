@@ -265,7 +265,7 @@ Deno.test("migrate", async () => {
     "status.type": JobSchemaV1["status"]["type"];
   };
 
-  const jobStoreV1 = new Store<JobSchemaV1, JobIndicesV1>(db, "job", {
+  const jobStoreV1 = new Store<JobSchemaV1, JobIndicesV1>(db, "job1", {
     indices: {
       "status.type": { getValue: (job) => job.status.type },
     },
@@ -276,7 +276,7 @@ Deno.test("migrate", async () => {
     "user.id": User["id"];
   };
 
-  const jobStore = new Store<JobSchema, JobIndices>(db, "job", {
+  const jobStore = new Store<JobSchema, JobIndices>(db, "job2", {
     indices: {
       "status.type": { getValue: (job) => job.status.type },
       "user.id": { getValue: (job) => job.user.id },
@@ -310,7 +310,7 @@ Deno.test("migrate", async () => {
     requestMessageId: job.request.message_id,
     replyMessageId: job.reply?.message_id,
     status: job.status,
-  }));
+  }), { oldKey: "job1" });
 
   const newJob1 = await jobStore.getById(job1.id);
   const newJob2 = await jobStore.getById(job2.id);

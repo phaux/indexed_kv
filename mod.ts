@@ -399,7 +399,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
       const [_storeKey, index] = entry.key;
       if (index === MAIN_INDEX_KEY) continue;
       await this.db.delete(entry.key);
-      logger().info(`Rebuiliding indices: Deleted ${entry.key.join("/")}`);
+      logger().info(`Rebuilding indices: Deleted ${entry.key.join("/")}`);
     }
 
     // iterate over the new defined indices
@@ -424,7 +424,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
           index.copy ? entry.value : null,
         );
         logger().info(
-          `Rebuiliding indices: Created ${
+          `Rebuilding indices: Created ${
             [this.key, indexKey, indexValue, id].join("/")
           }`,
         );
@@ -484,12 +484,14 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
    */
   async migrate<OldItem>(
     updater: (value: OldItem) => Item,
+    options: { oldKey?: Deno.KvKeyPart } = {},
   ): Promise<void> {
+    const { oldKey = this.key } = options;
     const newValues: Record<string, Item> = {};
     // iterate over the main index
     for await (
       const entry of this.db.list<OldItem>({
-        prefix: [this.key, MAIN_INDEX_KEY],
+        prefix: [oldKey, MAIN_INDEX_KEY],
       })
     ) {
       const [_storeKey, _index, id] = entry.key;
