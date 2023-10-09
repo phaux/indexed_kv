@@ -159,10 +159,15 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
    *
    * Adds item to the main index and all the defined indices.
    * Automatically assigns a new id to the item using {@link ulid}.
+   *
+   * See {@link Deno.Kv.set} for available options.
    */
-  async create(value: Item): Promise<Model<Item>> {
+  async create(
+    value: Item,
+    options?: { expireIn?: number },
+  ): Promise<Model<Item>> {
     const id = ulid();
-    await this.db.set([this.key, MAIN_INDEX_KEY, id], value);
+    await this.db.set([this.key, MAIN_INDEX_KEY, id], value, options);
     logger().debug(
       `Creating ${id}: Created ${[this.key, MAIN_INDEX_KEY, id].join("/")}`,
     );
@@ -175,6 +180,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
       await this.db.set(
         [this.key, indexKey, indexValue, id],
         index.copy ? value : null,
+        options,
       );
       logger().debug(
         `Creating ${id}: Created ${
@@ -587,9 +593,12 @@ export class Model<Item> {
    *
    * Updater argument should be either a partial object to merge with current value or a function that receives the current value and returns the new value.
    * You can either use the updater argument to provide a new value or modify {@link Model.value} property directly before calling this.
+   *
+   * See {@link Deno.AtomicOperation.set} for available options.
    */
   async attemptUpdate(
     updater?: Partial<Item> | ((value: Item) => Item),
+    options?: { expireIn?: number },
   ): Promise<Item | null> {
     // get current main entry
     const oldEntry = await this.store.db.get<Item>([
@@ -638,7 +647,7 @@ export class Model<Item> {
     // set the main entry
     transaction
       .check(oldEntry)
-      .set([this.store.key, MAIN_INDEX_KEY, this.id], this.value);
+      .set([this.store.key, MAIN_INDEX_KEY, this.id], this.value, options);
     logger().debug(
       `Updating ${this.id}: Updating ${
         [this.store.key, MAIN_INDEX_KEY, this.id].join("/")
@@ -661,6 +670,7 @@ export class Model<Item> {
           .set(
             [this.store.key, indexKey, newIndexValue, this.id],
             index.copy ? this.value : null,
+            options,
           );
         logger().debug(
           `Updating ${this.id}: Updating ${
@@ -674,6 +684,7 @@ export class Model<Item> {
           .set(
             [this.store.key, indexKey, newIndexValue, this.id],
             index.copy ? this.value : null,
+            options,
           );
         logger().debug(
           `Updating ${this.id}: Deleting ${
