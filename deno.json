@@ -1,0 +1,5 @@
+{
+  "tasks": {
+    "test": "deno test --unstable --coverage=coverage && deno coverage --lcov coverage --output=coverage/lcov.info"
+  }
+}
