@@ -431,3 +431,30 @@ Deno.test("index copy vs reference", async () => {
 
   await barStore.deleteAll();
 });
+
+Deno.test("index value null", async () => {
+  const fooStore = new Store<{ x: number | null }, { x: number | null }>(
+    db,
+    "foos",
+    {
+      indices: {
+        "x": { getValue: (item) => item.x },
+      },
+    },
+  );
+  await fooStore.deleteAll();
+  await fooStore.create({ x: null });
+  await fooStore.create({ x: 123 });
+  await fooStore.create({ x: null });
+  await fooStore.create({ x: 456 });
+  {
+    const foos = await fooStore.getBy("x", {});
+    assertEquals(foos.length, 2);
+  }
+  {
+    // @ts-expect-error - can't query by null
+    const foos = await fooStore.getBy("x", { value: null });
+    assertEquals(foos.length, 2); // no value specified, so all items are returned
+  }
+  await fooStore.deleteAll();
+});

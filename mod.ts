@@ -32,6 +32,8 @@ export type IndexOptionsMap<Item, IndexMap extends AnyIndexMap> = {
 export interface IndexOptions<Item, IndexValue> {
   /**
    * Computes the index value for an item.
+   *
+   * If the returned value is null then the item is not added to the index.
    */
   readonly getValue: (item: Item) => IndexValue;
 
@@ -47,7 +49,7 @@ export interface IndexOptions<Item, IndexValue> {
   copy?: boolean;
 }
 
-export type AnyIndexMap = Record<string, Deno.KvKeyPart>;
+export type AnyIndexMap = Record<string, Deno.KvKeyPart | null>;
 
 /**
  * Options for querying store items by an index.
@@ -56,17 +58,17 @@ export interface IndexListSelector<IndexValue> {
   /**
    * Starting index value. Inclusive.
    */
-  start?: IndexValue;
+  start?: NonNullable<IndexValue>;
 
   /**
    * Ending index value. Exclusive.
    */
-  end?: IndexValue;
+  end?: NonNullable<IndexValue>;
 
   /**
    * Single index value to be queried.
    */
-  value?: IndexValue;
+  value?: NonNullable<IndexValue>;
 
   /**
    * Starting ID or date. Inclusive.
@@ -173,10 +175,11 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
     );
     for (
       const [indexKey, index] of Object.entries<
-        IndexOptions<Item, Deno.KvKeyPart>
+        IndexOptions<Item, Deno.KvKeyPart | null>
       >(this.options.indices)
     ) {
       const indexValue = index.getValue(value);
+      if (indexValue == null) continue;
       await this.db.set(
         [this.key, indexKey, indexValue, id],
         index.copy ? value : null,
@@ -410,7 +413,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
     const startDate = Date.now();
     for (
       const [indexKey, index] of Object.entries<
-        IndexOptions<Item, Deno.KvKeyPart>
+        IndexOptions<Item, Deno.KvKeyPart | null>
       >(this.options.indices)
     ) {
       // iterate over items in the main index
@@ -430,10 +433,12 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
         // get the index value
         const indexValue = index.getValue(entry.value);
         // add the item to the index
-        await this.db.set(
-          [this.key, indexKey, indexValue, id],
-          index.copy ? entry.value : null,
-        );
+        if (indexValue != null) {
+          await this.db.set(
+            [this.key, indexKey, indexValue, id],
+            index.copy ? entry.value : null,
+          );
+        }
         // log every percent of progress
         if (Math.trunc((currentCount / totalCount) * 100) > progressPercent) {
           progressPercent = Math.trunc((currentCount / totalCount) * 100);
@@ -648,12 +653,13 @@ export class Model<Item> {
     const oldIndexEntries: Record<string, Deno.KvEntryMaybe<Item>> = {};
     for (
       const [indexKey, index] of Object.entries<
-        IndexOptions<Item, Deno.KvKeyPart>
+        IndexOptions<Item, Deno.KvKeyPart | null>
       >(
         this.store.options.indices,
       )
     ) {
       const indexValue = index.getValue(oldEntry.value);
+      if (indexValue == null) continue;
       oldIndexEntries[indexKey] = await this.store.db.get<Item>([
         this.store.key,
         indexKey,
@@ -685,45 +691,53 @@ export class Model<Item> {
     // update all index entries
     for (
       const [indexKey, index] of Object.entries<
-        IndexOptions<Item, Deno.KvKeyPart>
+        IndexOptions<Item, Deno.KvKeyPart | null>
       >(
         this.store.options.indices,
       )
     ) {
       const oldIndexValue = index.getValue(oldEntry.value);
-      const newIndexValue: Deno.KvKeyPart = index.getValue(this.value);
+      const newIndexValue = index.getValue(this.value);
+
       if (newIndexValue === oldIndexValue) {
-        transaction
-          .check(oldIndexEntries[indexKey])
-          .set(
-            [this.store.key, indexKey, newIndexValue, this.id],
-            index.copy ? this.value : null,
-            options,
+        if (newIndexValue != null && oldIndexValue != null) {
+          transaction
+            .check(oldIndexEntries[indexKey])
+            .set(
+              [this.store.key, indexKey, newIndexValue, this.id],
+              index.copy ? this.value : null,
+              options,
+            );
+          logger().debug(
+            `Updating ${this.id}: Updating ${
+              [this.store.key, indexKey, newIndexValue, this.id].join("/")
+            }`,
           );
-        logger().debug(
-          `Updating ${this.id}: Updating ${
-            [this.store.key, indexKey, newIndexValue, this.id].join("/")
-          }`,
-        );
+        }
       } else {
-        transaction
-          .check(oldIndexEntries[indexKey])
-          .delete([this.store.key, indexKey, oldIndexValue, this.id])
-          .set(
-            [this.store.key, indexKey, newIndexValue, this.id],
-            index.copy ? this.value : null,
-            options,
+        if (oldIndexValue != null) {
+          transaction
+            .check(oldIndexEntries[indexKey])
+            .delete([this.store.key, indexKey, oldIndexValue, this.id]);
+          logger().debug(
+            `Updating ${this.id}: Deleting ${
+              [this.store.key, indexKey, oldIndexValue, this.id].join("/")
+            }`,
           );
-        logger().debug(
-          `Updating ${this.id}: Deleting ${
-            [this.store.key, indexKey, oldIndexValue, this.id].join("/")
-          }`,
-        );
-        logger().debug(
-          `Updating ${this.id}: Creating ${
-            [this.store.key, indexKey, newIndexValue, this.id].join("/")
-          }`,
-        );
+        }
+        if (newIndexValue != null) {
+          transaction
+            .set(
+              [this.store.key, indexKey, newIndexValue, this.id],
+              index.copy ? this.value : null,
+              options,
+            );
+          logger().debug(
+            `Updating ${this.id}: Creating ${
+              [this.store.key, indexKey, newIndexValue, this.id].join("/")
+            }`,
+          );
+        }
       }
     }
 
@@ -793,12 +807,13 @@ export class Model<Item> {
     // delete all index entries
     for (
       const [indexKey, index] of Object.entries<
-        IndexOptions<Item, Deno.KvKeyPart>
+        IndexOptions<Item, Deno.KvKeyPart | null>
       >(
         this.store.options.indices,
       )
     ) {
       const indexValue = index.getValue(entry.value);
+      if (indexValue == null) continue;
       transaction
         .delete([this.store.key, indexKey, indexValue, this.id]);
       logger().debug(
