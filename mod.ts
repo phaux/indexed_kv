@@ -382,17 +382,6 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
    * Example:
    *
    * ```js
-   * import { handlers, setup } from "https://deno.land/std/log/mod.ts";
-   *
-   * setup({
-   *   handlers: {
-   *     console: new handlers.ConsoleHandler("DEBUG"),
-   *   },
-   *   loggers: {
-   *     indexed_kv: { level: "DEBUG", handlers: ["console"] },
-   *   },
-   * });
-   *
    * // Don't forget await or your app will be running during rebuilding (bad)!
    * await myStore.rebuildIndices();
    *
@@ -401,26 +390,42 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
    */
   async rebuildIndices() {
     // remove everything except the main index
+    console.log(
+      `Rebuilding indices for ${this.key}: Deleting current indices...`,
+    );
+    let totalCount = 0;
     for await (const entry of this.db.list({ prefix: [this.key] })) {
-      const [_storeKey, index] = entry.key;
-      if (index === MAIN_INDEX_KEY) continue;
+      const indexKey = entry.key[1];
+      if (indexKey === MAIN_INDEX_KEY) {
+        totalCount++;
+        continue;
+      }
       await this.db.delete(entry.key);
-      logger().info(`Rebuilding indices: Deleted ${entry.key.join("/")}`);
     }
+    console.log(
+      `Rebuilding indices for ${this.key}: Deleted indices for ${totalCount} items.`,
+    );
 
     // iterate over the new defined indices
+    const startDate = Date.now();
     for (
       const [indexKey, index] of Object.entries<
         IndexOptions<Item, Deno.KvKeyPart>
       >(this.options.indices)
     ) {
-      // iterate over the main index
+      // iterate over items in the main index
+      let currentCount = 0;
+      let progressPercent = 0;
+      console.log(
+        `Rebuilding indices for ${this.key}: Creating index ${indexKey}... (0%)`,
+      );
       for await (
         const entry of this.db.list<Item>({
           prefix: [this.key, MAIN_INDEX_KEY],
         })
       ) {
-        const [_storeKey, _indexKey, id] = entry.key;
+        currentCount++;
+        const id = entry.key[2];
         if (typeof id !== "string") continue;
         // get the index value
         const indexValue = index.getValue(entry.value);
@@ -429,15 +434,22 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
           [this.key, indexKey, indexValue, id],
           index.copy ? entry.value : null,
         );
-        logger().info(
-          `Rebuilding indices: Created ${
-            [this.key, indexKey, indexValue, id].join("/")
-          }`,
-        );
+        // log every percent of progress
+        if (Math.trunc((currentCount / totalCount) * 100) > progressPercent) {
+          progressPercent = Math.trunc((currentCount / totalCount) * 100);
+          console.log(
+            `Rebuilding indices for ${this.key}: Creating index ${indexKey}... (${progressPercent}%)`,
+          );
+        }
       }
     }
 
-    logger().info("Rebuilding indices finished successfully!");
+    const timeTakenSec = (Date.now() - startDate) / 1000;
+    console.log(
+      `Rebuilding indices for ${this.key}: Finished in ${
+        timeTakenSec.toFixed(0)
+      }s.`,
+    );
   }
 
   /**
@@ -455,17 +467,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
    *
    * Example:
    * ```ts
-   * import { handlers, setup } from "https://deno.land/std/log/mod.ts";
    * import { Store, Schema } from "https://deno.land/x/indexed_kv/mod.ts";
-   *
-   * setup({
-   *   handlers: {
-   *     console: new handlers.ConsoleHandler("DEBUG"),
-   *   },
-   *   loggers: {
-   *     indexed_kv: { level: "DEBUG", handlers: ["console"] },
-   *   },
-   * });
    *
    * interface UserV1 {
    *   userName: string;
@@ -493,56 +495,79 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
     options: { oldKey?: Deno.KvKeyPart } = {},
   ): Promise<void> {
     const { oldKey = this.key } = options;
-    const newValues: Record<string, Item> = {};
+    const newValues = new Map<string, Item>();
+    let newValuesCount = 0;
+    let lastLoggedCount = 0;
+    const transformStartDate = Date.now();
     // iterate over the main index
+    console.log(`Migrating ${this.key}: Transforming values... (0)`);
     for await (
       const entry of this.db.list<OldItem>({
         prefix: [oldKey, MAIN_INDEX_KEY],
       })
     ) {
-      const [_storeKey, _index, id] = entry.key;
-      if (typeof id !== "string") {
-        logger().warning(
-          `Migrating: Skipped ${entry.key.join("/")} (not a string ID)`,
-        );
-        continue;
-      }
+      const id = entry.key[2];
+      if (typeof id !== "string") continue;
       // try updating and save the value in memory
       try {
         const newValue = updater(entry.value);
-        newValues[id] = newValue;
-        logger().info(`Migrating: Updated ${entry.key.join("/")}`);
+        newValues.set(id, newValue);
       } catch (err) {
         throw new Error(
-          `Migration failed (not committing changes): Failed to update ${
+          `Migrating ${this.key} failed (not committing changes): Failed to update ${
             entry.key.join("/")
           }: ${err}`,
           { cause: err },
         );
       }
+      newValuesCount++;
+      // log every 1000 items
+      if (newValuesCount - lastLoggedCount >= 1000) {
+        lastLoggedCount = newValuesCount;
+        console.log(
+          `Migrating ${this.key}: Transforming values... (${newValuesCount})`,
+        );
+      }
     }
+    const transformDurationSec = (Date.now() - transformStartDate) / 1000;
+    console.log(
+      `Migrating ${this.key}: Finished transforming ${newValuesCount} values in ${
+        transformDurationSec.toFixed(0)
+      }s.`,
+    );
 
     // commit changes
-    const totalCount = Object.keys(newValues).length;
-    let count = 0;
-    for (const [id, value] of Object.entries(newValues)) {
+    let currentCount = 0;
+    let progressPercent = 0;
+    const commitStartDate = Date.now();
+    console.log(`Migrating ${this.key}: Committing changes... (0%)`);
+    for (const [id, value] of newValues) {
       try {
         await retry(() => this.db.set([this.key, MAIN_INDEX_KEY, id], value));
-        count++;
-        logger().info(
-          `Migrating: Committed ${[this.key, MAIN_INDEX_KEY, id].join("/")}`,
-        );
+        currentCount++;
       } catch (err) {
         throw new Error(
-          `Migration failed (${count}/${totalCount} committed): Failed to set ${
+          `Migrating ${this.key} failed (${currentCount}/${newValuesCount} committed): Failed to set ${
             [this.key, MAIN_INDEX_KEY, id].join("/")
           }: ${err}`,
           { cause: err },
         );
       }
+      // log every percent of progress
+      if (Math.trunc((currentCount / newValuesCount) * 100) > progressPercent) {
+        progressPercent = Math.trunc((currentCount / newValuesCount) * 100);
+        console.log(
+          `Migrating ${this.key}: Committing changes... (${progressPercent}%)`,
+        );
+      }
     }
 
-    logger().info("Migration finished successfully!");
+    const commitDurationSec = (Date.now() - commitStartDate) / 1000;
+    console.log(
+      `Migrating ${this.key}: Finished committing ${newValuesCount} changes in ${
+        commitDurationSec.toFixed(0)
+      }s.`,
+    );
   }
 }
 
