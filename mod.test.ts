@@ -1,9 +1,10 @@
-import { ConsoleHandler } from "https://deno.land/std@0.201.0/log/handlers.ts";
-import { Store } from "./mod.ts";
-import { setup } from "https://deno.land/std@0.201.0/log/mod.ts";
+import { assertAlmostEquals } from "https://deno.land/std@0.195.0/assert/assert_almost_equals.ts";
 import { assertEquals } from "https://deno.land/std@0.195.0/assert/assert_equals.ts";
 import { assertRejects } from "https://deno.land/std@0.195.0/assert/assert_rejects.ts";
 import { assert } from "https://deno.land/std@0.201.0/assert/assert.ts";
+import { ConsoleHandler } from "https://deno.land/std@0.201.0/log/handlers.ts";
+import { setup } from "https://deno.land/std@0.201.0/log/mod.ts";
+import { Store } from "./mod.ts";
 
 setup({
   handlers: {
@@ -456,5 +457,19 @@ Deno.test("index value null", async () => {
     const foos = await fooStore.getBy("x", { value: null });
     assertEquals(foos.length, 2); // no value specified, so all items are returned
   }
+  await fooStore.deleteAll();
+});
+
+Deno.test("item creation date", async () => {
+  const fooStore = new Store<{ x: number }, { x: number }>(db, "foos", {
+    indices: {
+      "x": { getValue: (item) => item.x },
+    },
+  });
+  await fooStore.deleteAll();
+  const date = new Date();
+  const foo = await fooStore.create({ x: 123 });
+  assert(foo.creationDate instanceof Date);
+  assertAlmostEquals(foo.creationDate.getTime(), date.getTime(), 500);
   await fooStore.deleteAll();
 });

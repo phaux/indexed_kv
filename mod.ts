@@ -4,7 +4,7 @@ import {
   retry,
   RetryOptions,
 } from "https://deno.land/std@0.201.0/async/mod.ts";
-import { ulid } from "https://deno.land/x/ulid@v0.3.0/mod.ts";
+import { decodeTime, ulid } from "https://deno.land/x/ulid@v0.3.0/mod.ts";
 
 const logger = () => getLogger("indexed_kv");
 
@@ -605,6 +605,16 @@ export class Model<Item> {
    * You can freely modify it and then call {@link Model.update} to save the changes.
    */
   value: Item;
+
+  /**
+   * Creation date of the item.
+   *
+   * The creation date is encoded in the ID.
+   * You can also decode it using {@link decodeTime} from ULID.
+   */
+  get creationDate(): Date {
+    return new Date(decodeTime(this.id));
+  }
 
   /**
    * Creates a new model instance.
