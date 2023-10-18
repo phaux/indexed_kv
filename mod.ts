@@ -459,6 +459,9 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
    *
    * If your updater function fails to update an item then the migration will be aborted and no changes will be committed.
    *
+   * If your updater function returns null then the item won't be updated.
+   * If you also specified `oldKey` then the item won't be copied to the current store.
+   *
    * Warning: This is not an atomic operation.
    * You should make sure this function finishes before the rest of your application is started.
    * If this function fails it throws to make sure your app doesn't start with a broken database (don't catch this error).
@@ -491,7 +494,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
    * You can also still try migrating again but with a updater function that accepts an union of new and old type and acts accordingly.
    */
   async migrate<OldItem>(
-    updater: (value: OldItem) => Item,
+    updater: (value: OldItem) => Item | null,
     options: { oldKey?: Deno.KvKeyPart } = {},
   ): Promise<void> {
     const { oldKey = this.key } = options;
@@ -511,7 +514,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
       // try updating and save the value in memory
       try {
         const newValue = updater(entry.value);
-        newValues.set(id, newValue);
+        if (newValue != null) newValues.set(id, newValue);
       } catch (err) {
         throw new Error(
           `Migrating ${this.key} failed (not committing changes): Failed to update ${
