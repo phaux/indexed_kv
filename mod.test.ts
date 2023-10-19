@@ -74,12 +74,12 @@ Deno.test("list by index", async () => {
     lastUpdateDate: new Date(),
   });
   assertEquals(
-    (await taskStore.getBy("requestedBy", { value: "test" }))[0].value
+    (await taskStore.getBy("requestedBy", { value: "test" }))[0]?.value
       .params,
     { a: 1, b: null },
   );
   assertEquals(
-    (await taskStore.getBy("status.type", { value: "idle" }))[0].value
+    (await taskStore.getBy("status.type", { value: "idle" }))[0]?.value
       .params,
     { a: 1, b: null },
   );
@@ -87,14 +87,14 @@ Deno.test("list by index", async () => {
   await task.update({ status: { type: "processing", progress: 33 } });
   assertEquals(
     (await taskStore.getBy("status.type", { value: "processing" }))[0]
-      .value
+      ?.value
       .params,
     { a: 1, b: null },
   );
 
   await task.update({ status: { type: "done" } });
   assertEquals(
-    (await taskStore.getBy("status.type", { value: "done" }))[0].value
+    (await taskStore.getBy("status.type", { value: "done" }))[0]?.value
       .params,
     { a: 1, b: null },
   );
@@ -197,11 +197,11 @@ Deno.test("rebuilds indices", async () => {
   await oldTaskStore.create({ requestedBy: "user_a", params: { a: 2 } });
   await oldTaskStore.create({ requestedBy: "user_b", params: { a: 3 } });
   assertEquals(
-    (await oldTaskStore.getBy("a", { value: 1 }))[0].value,
+    (await oldTaskStore.getBy("a", { value: 1 }))[0]?.value,
     { requestedBy: "user_a", params: { a: 1 } },
   );
   assertEquals(
-    (await oldTaskStore.getBy("a", { value: 3 }))[0].value,
+    (await oldTaskStore.getBy("a", { value: 3 }))[0]?.value,
     { requestedBy: "user_b", params: { a: 3 } },
   );
 
@@ -241,7 +241,7 @@ Deno.test("migrate", async () => {
   interface JobSchemaV1 {
     params: Partial<FooRequest>;
     request: Message;
-    reply?: Message;
+    reply?: Message | undefined;
     status:
       | { type: "waiting" }
       | { type: "processing"; progress: number }
@@ -255,7 +255,7 @@ Deno.test("migrate", async () => {
     user: User;
     chat: Chat;
     requestMessageId: number;
-    replyMessageId?: number;
+    replyMessageId?: number | undefined;
     status:
       | { type: "waiting" }
       | { type: "processing"; progress: number }
@@ -347,7 +347,7 @@ Deno.test("migrate", async () => {
     undefined,
   );
   await jobStore.rebuildIndices();
-  assertEquals((await jobStore.getBy("user.id", { value: 2 }))[0].value, {
+  assertEquals((await jobStore.getBy("user.id", { value: 2 }))[0]?.value, {
     task: { type: "foo", params: { a: 2 } },
     user: { id: 2 },
     chat: { id: 2 },

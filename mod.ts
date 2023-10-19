@@ -46,7 +46,7 @@ export interface IndexOptions<Item, IndexValue> {
    *
    * Defaults to false.
    */
-  copy?: boolean;
+  copy?: boolean | undefined;
 }
 
 export type AnyIndexMap = Record<string, Deno.KvKeyPart | null>;
@@ -58,17 +58,17 @@ export interface IndexListSelector<IndexValue> {
   /**
    * Starting index value. Inclusive.
    */
-  start?: NonNullable<IndexValue>;
+  start?: NonNullable<IndexValue> | undefined;
 
   /**
    * Ending index value. Exclusive.
    */
-  end?: NonNullable<IndexValue>;
+  end?: NonNullable<IndexValue> | undefined;
 
   /**
    * Single index value to be queried.
    */
-  value?: NonNullable<IndexValue>;
+  value?: NonNullable<IndexValue> | undefined;
 
   /**
    * Starting ID or date. Inclusive.
@@ -78,7 +78,7 @@ export interface IndexListSelector<IndexValue> {
    * Only works as expected when {@link IndexListSelector.value} is also passed.
    * Ignored otherwise.
    */
-  after?: Date | string;
+  after?: Date | string | undefined;
 
   /**
    * Ending ID or date. Exclusive.
@@ -88,7 +88,7 @@ export interface IndexListSelector<IndexValue> {
    * Only works as expected when {@link IndexListSelector.value} is also passed.
    * Ignored otherwise.
    */
-  before?: Date | string;
+  before?: Date | string | undefined;
 }
 
 /**
@@ -100,13 +100,13 @@ export interface ListSelector {
    *
    * Limits the results to items created after and including this date.
    */
-  after?: Date | string;
+  after?: Date | string | undefined;
   /**
    * Ending ID or date. Exclusive.
    *
    * Limits the results to items created before this date.
    */
-  before?: Date | string;
+  before?: Date | string | undefined;
 }
 
 /**
@@ -116,7 +116,7 @@ export interface GetOptions extends Deno.KvListOptions {
   /**
    * Signal to abort collecting the results and return what was collected so far.
    */
-  signal?: AbortSignal;
+  signal?: AbortSignal | undefined;
 }
 
 /**
@@ -166,10 +166,14 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
    */
   async create(
     value: Item,
-    options?: { expireIn?: number },
+    options?: { expireIn?: number | undefined },
   ): Promise<Model<Item>> {
     const id = ulid();
-    await this.db.set([this.key, MAIN_INDEX_KEY, id], value, options);
+    await this.db.set(
+      [this.key, MAIN_INDEX_KEY, id],
+      value,
+      omitUndef(options),
+    );
     logger().debug(
       `Creating ${id}: Created ${[this.key, MAIN_INDEX_KEY, id].join("/")}`,
     );
@@ -183,7 +187,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
       await this.db.set(
         [this.key, indexKey, indexValue, id],
         index.copy ? value : null,
-        options,
+        omitUndef(options),
       );
       logger().debug(
         `Creating ${id}: Created ${
@@ -282,7 +286,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
   async getBy<IndexKey extends keyof IndexMap & string>(
     index: IndexKey,
     selector: IndexListSelector<IndexMap[IndexKey]>,
-    options?: Deno.KvListOptions & { signal?: AbortSignal },
+    options?: Deno.KvListOptions & { signal?: AbortSignal | undefined },
   ): Promise<Array<Model<Item>>> {
     const items: Model<Item>[] = [];
     const signal = options?.signal ?? neverSignal;
@@ -500,7 +504,7 @@ export class Store<Item, IndexMap extends AnyIndexMap = {}> {
    */
   async migrate<OldItem>(
     updater: (value: OldItem) => Item | null,
-    options: { oldKey?: Deno.KvKeyPart } = {},
+    options: { oldKey?: Deno.KvKeyPart | undefined } = {},
   ): Promise<void> {
     const { oldKey = this.key } = options;
     const newValues = new Map<string, Item>();
@@ -640,8 +644,8 @@ export class Model<Item> {
    * See {@link Deno.AtomicOperation.set} for available options.
    */
   async attemptUpdate(
-    updater?: Partial<Item> | ((value: Item) => Item),
-    options?: { expireIn?: number },
+    updater?: Partial<Item> | ((value: Item) => Item) | undefined,
+    options?: { expireIn?: number | undefined } | undefined,
   ): Promise<Item | null> {
     // get current main entry
     const oldEntry = await this.store.db.get<Item>([
@@ -691,7 +695,11 @@ export class Model<Item> {
     // set the main entry
     transaction
       .check(oldEntry)
-      .set([this.store.key, MAIN_INDEX_KEY, this.id], this.value, options);
+      .set(
+        [this.store.key, MAIN_INDEX_KEY, this.id],
+        this.value,
+        omitUndef(options),
+      );
     logger().debug(
       `Updating ${this.id}: Updating ${
         [this.store.key, MAIN_INDEX_KEY, this.id].join("/")
@@ -712,11 +720,11 @@ export class Model<Item> {
       if (newIndexValue === oldIndexValue) {
         if (newIndexValue != null && oldIndexValue != null) {
           transaction
-            .check(oldIndexEntries[indexKey])
+            .check(oldIndexEntries[indexKey]!)
             .set(
               [this.store.key, indexKey, newIndexValue, this.id],
               index.copy ? this.value : null,
-              options,
+              omitUndef(options),
             );
           logger().debug(
             `Updating ${this.id}: Updating ${
@@ -727,7 +735,7 @@ export class Model<Item> {
       } else {
         if (oldIndexValue != null) {
           transaction
-            .check(oldIndexEntries[indexKey])
+            .check(oldIndexEntries[indexKey]!)
             .delete([this.store.key, indexKey, oldIndexValue, this.id]);
           logger().debug(
             `Updating ${this.id}: Deleting ${
@@ -740,7 +748,7 @@ export class Model<Item> {
             .set(
               [this.store.key, indexKey, newIndexValue, this.id],
               index.copy ? this.value : null,
-              options,
+              omitUndef(options),
             );
           logger().debug(
             `Updating ${this.id}: Creating ${
@@ -773,8 +781,8 @@ export class Model<Item> {
    * You can either use the updater argument to provide a new value or modify {@link Model.value} property directly before calling this.
    */
   update(
-    updater?: Partial<Item> | ((value: Item) => Item),
-    options?: RetryOptions,
+    updater?: Partial<Item> | ((value: Item) => Item) | undefined,
+    options?: RetryOptions | undefined,
   ): Promise<Item | null> {
     return retry(() => this.attemptUpdate(updater), options);
   }
@@ -852,7 +860,27 @@ export class Model<Item> {
    *
    * The current {@link Model.value} is not removed and can be still accessed for example to create a new entry.
    */
-  delete(options?: RetryOptions): Promise<void> {
+  delete(options?: RetryOptions | undefined): Promise<void> {
     return retry(() => this.attemptDelete(), options);
   }
+}
+
+/**
+ * Removes all undefined properties from an object.
+ */
+function omitUndef<O extends object | undefined>(
+  object: O,
+):
+  & {
+    [K in keyof O as undefined extends O[K] ? never : K]: O[K];
+  }
+  & {
+    [K in keyof O as undefined extends O[K] ? K : never]?:
+      & O[K]
+      & (object | null);
+  } {
+  if (object == undefined) return object as never;
+  return Object.fromEntries(
+    Object.entries(object).filter(([, v]) => v !== undefined),
+  ) as never;
 }
